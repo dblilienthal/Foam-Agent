@@ -6,7 +6,8 @@ from typing import Optional, Any, Type, TypedDict, List, Dict
 from pydantic import BaseModel, Field
 from langchain.chat_models import init_chat_model
 from langchain_community.vectorstores import FAISS
-from langchain_openai.embeddings import OpenAIEmbeddings
+from langchain_openai.embeddings import OpenAIEmbeddings, AzureOpenAIEmbeddings
+from langchain_openai import AzureChatOpenAI
 from langchain_aws import ChatBedrock, ChatBedrockConverse
 from langchain_anthropic import ChatAnthropic
 from pathlib import Path
@@ -22,13 +23,89 @@ from langchain_ollama import ChatOllama
 # Global dictionary to store loaded FAISS databases
 FAISS_DB_CACHE = {}
 DATABASE_DIR = f"{Path(__file__).resolve().parent.parent}/database/faiss"
+_EMBEDDINGS_INSTANCE = None
 
-FAISS_DB_CACHE = {
-    "openfoam_allrun_scripts": FAISS.load_local(f"{DATABASE_DIR}/openfoam_allrun_scripts", OpenAIEmbeddings(model="text-embedding-3-small"), allow_dangerous_deserialization=True),
-    "openfoam_tutorials_structure": FAISS.load_local(f"{DATABASE_DIR}/openfoam_tutorials_structure", OpenAIEmbeddings(model="text-embedding-3-small"), allow_dangerous_deserialization=True),
-    "openfoam_tutorials_details": FAISS.load_local(f"{DATABASE_DIR}/openfoam_tutorials_details", OpenAIEmbeddings(model="text-embedding-3-small"), allow_dangerous_deserialization=True),
-    "openfoam_command_help": FAISS.load_local(f"{DATABASE_DIR}/openfoam_command_help", OpenAIEmbeddings(model="text-embedding-3-small"), allow_dangerous_deserialization=True)
-}
+def get_embeddings(config: Optional[Config] = None):
+    """
+    Get the appropriate embeddings instance based on configuration.
+    
+    Args:
+        config: Optional Config object. If None, defaults to standard OpenAI embeddings.
+    
+    Returns:
+        Embeddings instance (OpenAIEmbeddings or AzureOpenAIEmbeddings)
+    """
+    global _EMBEDDINGS_INSTANCE
+    
+    if _EMBEDDINGS_INSTANCE is not None:
+        return _EMBEDDINGS_INSTANCE
+    
+    if config is None:
+        # Default to OpenAI embeddings
+        _EMBEDDINGS_INSTANCE = OpenAIEmbeddings(model="text-embedding-3-small")
+    elif getattr(config, "model_provider", "openai").lower() == "azure_openai":
+        # Use Azure OpenAI embeddings
+        azure_endpoint = getattr(config, "azure_endpoint", "")
+        azure_embedding_deployment = getattr(config, "azure_embedding_deployment_name", "")
+        azure_api_version = getattr(config, "azure_api_version", "2024-02-15-preview")
+        
+        if not azure_endpoint or not azure_embedding_deployment:
+            raise ValueError(
+                "Azure OpenAI embeddings require 'azure_endpoint' and 'azure_embedding_deployment_name' "
+                "to be set in config."
+            )
+        
+        _EMBEDDINGS_INSTANCE = AzureOpenAIEmbeddings(
+            azure_endpoint=azure_endpoint,
+            azure_deployment=azure_embedding_deployment,
+            api_version=azure_api_version
+        )
+    else:
+        # Default to OpenAI embeddings for other providers
+        _EMBEDDINGS_INSTANCE = OpenAIEmbeddings(model="text-embedding-3-small")
+    
+    return _EMBEDDINGS_INSTANCE
+
+def initialize_faiss_cache(config: Optional[Config] = None):
+    """
+    Initialize the FAISS database cache with the appropriate embeddings.
+    
+    Args:
+        config: Optional Config object for determining which embeddings to use
+    """
+    global FAISS_DB_CACHE
+    
+    if FAISS_DB_CACHE:
+        # Already initialized
+        return
+    
+    embeddings = get_embeddings(config)
+    
+    FAISS_DB_CACHE = {
+        "openfoam_allrun_scripts": FAISS.load_local(
+            f"{DATABASE_DIR}/openfoam_allrun_scripts", 
+            embeddings, 
+            allow_dangerous_deserialization=True
+        ),
+        "openfoam_tutorials_structure": FAISS.load_local(
+            f"{DATABASE_DIR}/openfoam_tutorials_structure", 
+            embeddings, 
+            allow_dangerous_deserialization=True
+        ),
+        "openfoam_tutorials_details": FAISS.load_local(
+            f"{DATABASE_DIR}/openfoam_tutorials_details", 
+            embeddings, 
+            allow_dangerous_deserialization=True
+        ),
+        "openfoam_command_help": FAISS.load_local(
+            f"{DATABASE_DIR}/openfoam_command_help", 
+            embeddings, 
+            allow_dangerous_deserialization=True
+        )
+    }
+
+# Initialize with default OpenAI embeddings (will be re-initialized if config specifies Azure)
+initialize_faiss_cache()
 
 class FoamfilePydantic(BaseModel):
     file_name: str = Field(description="Name of the OpenFOAM input file")
@@ -76,6 +153,37 @@ class LLMService:
                 model_provider=self.model_provider, 
                 temperature=self.temperature
             )
+        elif self.model_provider.lower() == "azure_openai":
+            # Get Azure-specific configuration from config
+            azure_endpoint = getattr(config, "azure_endpoint", "")
+            azure_deployment_name = getattr(config, "azure_deployment_name", "")
+            azure_api_version = getattr(config, "azure_api_version", "2024-02-15-preview")
+            
+            if not azure_endpoint or not azure_deployment_name:
+                raise ValueError(
+                    "Azure OpenAI requires 'azure_endpoint' and 'azure_deployment_name' to be set in config. "
+                    "Please provide these values in your Config object."
+                )
+            
+            # Azure uses deployment names, but tiktoken needs the actual model name
+            # for token counting. Use azure_model_name from config if provided,
+            # otherwise fall back to model_version.
+            azure_model_name = getattr(config, "azure_model_name", "")
+            base_model = azure_model_name if azure_model_name else self.model_version
+            
+            self.llm = AzureChatOpenAI(
+                azure_endpoint=azure_endpoint,
+                azure_deployment=azure_deployment_name,
+                api_version=azure_api_version,
+                temperature=self.temperature,
+                model=base_model  # Set the model name for token counting
+            )
+            
+            # Re-initialize FAISS cache with Azure OpenAI embeddings
+            global FAISS_DB_CACHE, _EMBEDDINGS_INSTANCE
+            FAISS_DB_CACHE = {}
+            _EMBEDDINGS_INSTANCE = None
+            initialize_faiss_cache(config)
         elif self.model_provider.lower() == "ollama":
             try:
                 response = requests.get("http://localhost:11434/api/version", timeout=2)
