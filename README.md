@@ -179,7 +179,40 @@ class Config:
     temperature: float = 1.0
 ```
 
-To change the LLM configuration inside Docker:
+OR, all provider settings can be configured via **environment variables** passed to `docker run -e`, so you never need to edit `src/config.py` inside the container. 
+
+#### Supported providers
+
+- **OpenAI (via `OPENAI_API_KEY`)**:
+  - **model_provider**: `"openai"`
+  - **model_version**: e.g. `"gpt-5-mini"` or another supported OpenAI-compatible model name
+- **Azure OpenAI**:
+  - **model_provider**: `"azure_openai"`
+  - See [Section 2.1](#21-azure-openai-via-docker) below for full details
+- **AWS Bedrock**:
+  - **model_provider**: `"bedrock"`
+  - **model_version**: your Bedrock application ARN
+- **Ollama (local models)**:
+  - **model_provider**: `"ollama"`
+  - **model_version**: the local model name, e.g. `"qwen2.5:32b-instruct"`
+
+#### Environment variables for provider selection
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `MODEL_PROVIDER` | LLM provider (`openai`, `azure_openai`, `ollama`, `bedrock`) | `openai` |
+| `MODEL_VERSION` | Model or deployment name | `gpt-5-mini` |
+
+**Example** — standard OpenAI:
+```bash
+docker run -it \
+  -e OPENAI_API_KEY=sk-... \
+  -p 7860:7860 \
+  --name foamagent \
+  leoyue123/foamagent
+```
+
+To change the LLM configuration inside Docker (alternative to env vars):
 
 ```bash
 docker exec -it foamagent bash
@@ -187,15 +220,67 @@ cd /home/openfoam/Foam-Agent
 nano src/config.py
 ```
 
-- **OpenAI (via `OPENAI_API_KEY`)**:
-  - **model_provider**: `"openai"`
-  - **model_version**: e.g. `"gpt-5-mini"` or another supported OpenAI-compatible model name
-- **AWS Bedrock**:
-  - **model_provider**: `"bedrock"`
-  - **model_version**: your Bedrock application ARN
-- **Ollama (local models)**:
-  - **model_provider**: `"ollama"`
-  - **model_version**: the local model name, e.g. `"qwen2.5:32b-instruct"`
+#### 2.1 Azure OpenAI via Docker
+
+To use Azure OpenAI, pass the Azure-specific environment variables with `docker run -e`. No file editing is needed.
+
+| Variable | Description | Required | Default |
+|----------|-------------|----------|---------|
+| `MODEL_PROVIDER` | Must be `azure_openai` | ✅ | `openai` |
+| `AZURE_OPENAI_API_KEY` | Your Azure OpenAI resource API key | ✅ | — |
+| `AZURE_OPENAI_ENDPOINT` | Resource endpoint URL (e.g. `https://my-resource.openai.azure.com/`) | ✅ | — |
+| `AZURE_OPENAI_DEPLOYMENT_NAME` | Deployment name for the chat model | ✅ | — |
+| `AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME` | Deployment name for the embeddings model | ✅ | — |
+| `AZURE_OPENAI_API_VERSION` | Azure API version | | `2024-12-01-preview` |
+| `AZURE_OPENAI_MODEL_NAME` | Actual model name for token counting (e.g. `gpt-4o-mini`) | | Falls back to `MODEL_VERSION` |
+| `MODEL_VERSION` | Overrides model version (can match deployment name) | | `gpt-5-mini` |
+
+**Full example:**
+
+```bash
+docker run -it \
+  -e MODEL_PROVIDER=azure_openai \
+  -e AZURE_OPENAI_API_KEY=your-azure-api-key \
+  -e AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/ \
+  -e AZURE_OPENAI_DEPLOYMENT_NAME=gpt-5-mini \
+  -e AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME=text-embedding-3-small \
+  -e AZURE_OPENAI_API_VERSION=2024-12-01-preview \
+  -e AZURE_OPENAI_MODEL_NAME=gpt-4o-mini \
+  -p 7860:7860 \
+  --name foamagent \
+  leoyue123/foamagent
+```
+
+**Minimal example** (uses defaults for api_version and token-counting model):
+
+```bash
+docker run -it \
+  -e MODEL_PROVIDER=azure_openai \
+  -e AZURE_OPENAI_API_KEY=your-azure-api-key \
+  -e AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/ \
+  -e AZURE_OPENAI_DEPLOYMENT_NAME=gpt-5-mini \
+  -e AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME=text-embedding-3-small \
+  -p 7860:7860 \
+  --name foamagent \
+  leoyue123/foamagent
+```
+
+You can also mount a prompt file at the same time:
+
+```bash
+docker run -it \
+  -e MODEL_PROVIDER=azure_openai \
+  -e AZURE_OPENAI_API_KEY=your-azure-api-key \
+  -e AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/ \
+  -e AZURE_OPENAI_DEPLOYMENT_NAME=gpt-5-mini \
+  -e AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME=text-embedding-3-small \
+  -v /path/to/my_requirement.txt:/home/openfoam/Foam-Agent/user_requirement.txt \
+  -p 7860:7860 \
+  --name foamagent \
+  leoyue123/foamagent
+```
+
+> **Tip:** When the container starts, the welcome banner shows the detected Azure configuration so you can verify everything is set correctly before running a simulation.
 
 
 ### 3. Using Foam-Agent via MCP (with Docker)
