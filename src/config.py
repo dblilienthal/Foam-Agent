@@ -27,5 +27,5 @@ class Config:
     azure_endpoint: str = field(default_factory=lambda: os.environ.get("AZURE_OPENAI_ENDPOINT", ""))  # e.g., "https://your-resource.openai.azure.com/"
     azure_deployment_name: str = field(default_factory=lambda: os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME", ""))  # The deployment name you chose in Azure
     azure_api_version: str = field(default_factory=lambda: os.environ.get("AZURE_OPENAI_API_VERSION", "2024-12-01-preview"))  # Azure OpenAI API version
-    azure_model_name: str = field(default_factory=lambda: os.environ.get("AZURE_OPENAI_MODEL_NAME", ""))  # Actual model name for token counting (e.g., "gpt-4o-mini")
+    azure_model_name: str = field(default_factory=lambda: os.environ.get("AZURE_OPENAI_MODEL_NAME", ""))  # Actual model name for token counting (e.g., "gpt-5-mini")
     azure_embedding_deployment_name: str = field(default_factory=lambda: os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME", ""))  # Deployment name for embeddings (e.g., "text-embedding-3-small")

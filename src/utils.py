@@ -39,11 +39,35 @@ def get_embeddings(config: Optional[Config] = None):
     
     if _EMBEDDINGS_INSTANCE is not None:
         return _EMBEDDINGS_INSTANCE
-    
-    if config is None:
+
+    # Determine effective provider: use config if provided, otherwise fall back to env vars
+    if config is not None:
+        effective_provider = getattr(config, "model_provider", "openai").lower()
+    else:
+        effective_provider = os.environ.get("MODEL_PROVIDER", "openai").lower()
+
+    if config is None and effective_provider == "azure_openai":
+        # No config object provided, but Azure is requested via env vars — read directly from env
+        azure_endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT", "")
+        azure_embedding_deployment = os.environ.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME", "")
+        azure_api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+        
+        if not azure_endpoint or not azure_embedding_deployment:
+            raise ValueError(
+                "Azure OpenAI embeddings require the AZURE_OPENAI_ENDPOINT and "
+                "AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME environment variables to be set."
+            )
+
+        _EMBEDDINGS_INSTANCE = AzureOpenAIEmbeddings(
+            model='text-embedding-3-small', 
+            azure_endpoint=azure_endpoint,
+            azure_deployment=azure_embedding_deployment,
+            api_version=azure_api_version
+        )
+    elif config is None:
         # Default to OpenAI embeddings
         _EMBEDDINGS_INSTANCE = OpenAIEmbeddings(model="text-embedding-3-small")
-    elif getattr(config, "model_provider", "openai").lower() == "azure_openai":
+    elif effective_provider == "azure_openai":
         # Use Azure OpenAI embeddings
         azure_endpoint = getattr(config, "azure_endpoint", "")
         azure_embedding_deployment = getattr(config, "azure_embedding_deployment_name", "")
@@ -56,6 +80,7 @@ def get_embeddings(config: Optional[Config] = None):
             )
         
         _EMBEDDINGS_INSTANCE = AzureOpenAIEmbeddings(
+            model='text-embedding-3-small',
             azure_endpoint=azure_endpoint,
             azure_deployment=azure_embedding_deployment,
             api_version=azure_api_version
