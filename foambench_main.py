@@ -64,11 +64,22 @@ def main():
     args = parse_args()
     print(args)
 
-    # Check if OPENAI_API_KEY is available in the environment
+    # Check which API key is available and set MODEL_PROVIDER accordingly.
+    # Azure OpenAI takes priority over standard OpenAI.
+    azure_openai_key = os.getenv("AZURE_OPENAI_API_KEY")
     openai_api_key = os.getenv("OPENAI_API_KEY")
-    if not openai_api_key:
-        print("Error: OPENAI_API_KEY is not set in the environment.")
+
+    if azure_openai_key:
+        print("AZURE_OPENAI_API_KEY detected. Using Azure OpenAI implementation.")
+        os.environ["MODEL_PROVIDER"] = "azure_openai"
+    elif openai_api_key:
+        print("OPENAI_API_KEY detected. Using standard OpenAI implementation.")
+        os.environ["MODEL_PROVIDER"] = "openai"
+    else:
+        print("Error: Neither AZURE_OPENAI_API_KEY nor OPENAI_API_KEY is set in the environment.")
         sys.exit(1)
+
+    print(f"MODEL_PROVIDER set to: {os.environ['MODEL_PROVIDER']}")
 
     # Create the output folder
     os.makedirs(args.output, exist_ok=True)
